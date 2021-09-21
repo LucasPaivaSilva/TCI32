@@ -1,12 +1,47 @@
 #include <Arduino.h>
-#include <BLEMidi.h>
+#include <MIDI.h>
 #include <Wire.h>
 #include <Adafruit_I2CDevice.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include "AiEsp32RotaryEncoder.h"
+
+/*
+connecting Rotary encoder
+
+Rotary encoder side    MICROCONTROLLER side  
+-------------------    ---------------------------------------------------------------------
+CLK (A pin)            any microcontroler intput pin with interrupt -> in this example pin 32
+DT (B pin)             any microcontroler intput pin with interrupt -> in this example pin 21
+SW (button pin)        any microcontroler intput pin with interrupt -> in this example pin 25
+GND - to microcontroler GND
+VCC                    microcontroler VCC (then set ROTARY_ENCODER_VCC_PIN -1) 
+
+***OR in case VCC pin is not free you can cheat and connect:***
+VCC                    any microcontroler output pin - but set also ROTARY_ENCODER_VCC_PIN 25 
+                        in this example pin 25
+
+*/
+#define ROTARY_ENCODER_A_PIN 33
+#define ROTARY_ENCODER_B_PIN 25
+#define ROTARY_ENCODER_BUTTON_PIN 32
+#define ROTARY_ENCODER_VCC_PIN -1 /* 27 put -1 of Rotary encoder Vcc is connected directly to 3,3V; else you can use declared output pin for powering rotary encoder */
+
+//depending on your encoder - try 1,2 or 4 to get expected behaviour
+//#define ROTARY_ENCODER_STEPS 1
+//#define ROTARY_ENCODER_STEPS 2
+#define ROTARY_ENCODER_STEPS 4
+
+//instead of changing here, rather change numbers above
+AiEsp32RotaryEncoder rotaryEncoder = AiEsp32RotaryEncoder(ROTARY_ENCODER_A_PIN, ROTARY_ENCODER_B_PIN, ROTARY_ENCODER_BUTTON_PIN, ROTARY_ENCODER_VCC_PIN, ROTARY_ENCODER_STEPS);
 
 #define SCREEN_ADDRESS 0x3C ///< See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32
 Adafruit_SSD1306 display(128 , 64, &Wire, -1);
+
+int DisplayTestVaribale = 0;
+
+//ESP32 RX Pin RX2 Used:
+MIDI_CREATE_INSTANCE(HardwareSerial, Serial2, MIDI);
 
 volatile int interruptCounter;
 hw_timer_t * timer = NULL;
@@ -33,7 +68,6 @@ uint8_t note3_note;
 bool note3on = false;
 int note3toDisplay = 0;
 
-void connected();
 void SetupMidi();
 void SetupInterrupts();
 void SetupDisplay();
@@ -48,9 +82,9 @@ int PitchToFreq(int pitch)
 	return freq;
 }
 
-void onNoteOn(uint8_t channel, uint8_t note, uint8_t velocity, uint16_t timestamp)
+void onNoteOn(byte channel, byte note, byte velocity)
 {
-  Serial.printf("Received note on : channel %d, note %d, velocity %d (timestamp %dms)\n", channel, note, velocity, timestamp);
+  //Serial.printf("Received note on : channel %d, note %d, velocity %d (timestamp ms)\n", channel, note, velocity);
   if (note1on == false)
   {
     note1on = true;
@@ -74,9 +108,9 @@ void onNoteOn(uint8_t channel, uint8_t note, uint8_t velocity, uint16_t timestam
   }
 }
 
-void onNoteOff(uint8_t channel, uint8_t note, uint8_t velocity, uint16_t timestamp)
+void onNoteOff(byte channel, byte note, byte velocity)
 {
-  Serial.printf("Received note off : channel %d, note %d, velocity %d (timestamp %dms)\n", channel, note, velocity, timestamp);
+  //Serial.printf("Received note off : channel %d, note %d, velocity %d (timestamp ms)\n", channel, note, velocity);
   if (note == note1_note)
   {
     note1on = false;
@@ -94,26 +128,17 @@ void onNoteOff(uint8_t channel, uint8_t note, uint8_t velocity, uint16_t timesta
   }
 }
 
-void onControlChange(uint8_t channel, uint8_t controller, uint8_t value, uint16_t timestamp)
+void onControlChange(byte channel, byte note, byte velocity)
 {
-    Serial.printf("Received control change : channel %d, controller %d, value %d (timestamp %dms)\n", channel, controller, value, timestamp);
-}
-
-void connected()
-{
-  Serial.println("Connected");
+    Serial.printf("Received control change : channel %d, controller , value  (timestamp dms)\n", channel);
 }
 
 void SetupMidi()
 {
-  BLEMidiServer.begin("TCI_MIDI");
-  BLEMidiServer.setOnConnectCallback(connected);
-  BLEMidiServer.setOnDisconnectCallback([](){     // To show how to make a callback with a lambda function
-  Serial.println("Disconnected");
-  });
-  BLEMidiServer.setNoteOnCallback(onNoteOn);
-  BLEMidiServer.setNoteOffCallback(onNoteOff);
-  BLEMidiServer.setControlChangeCallback(onControlChange);
+  MIDI.begin(MIDI_CHANNEL_OMNI);
+  MIDI.setHandleNoteOn(onNoteOn); 
+  MIDI.setHandleNoteOff(onNoteOff);
+  MIDI.setHandleControlChange(onControlChange);  
 }
 
 void IRAM_ATTR onTimer() {
@@ -237,6 +262,8 @@ void UpdateMIDIMode(bool DrawEntireDisplay, bool UptadeInfo)
     }
     display.print((note3toDisplay));
     display.println(F(" Hz"));
+    display.print(F("Var: "));
+    display.println(DisplayTestVaribale);
     display.display();
   }
 
@@ -262,6 +289,33 @@ void SetupDisplay()
   display.display();
 }
 
+void rotary_onButtonClick()
+{
+	static unsigned long lastTimePressed = 0;
+	//ignore multiple press in that time milliseconds
+	if (millis() - lastTimePressed < 500)
+	{
+		return;
+	}
+	lastTimePressed = millis();
+	Serial.print("button pressed at ");
+	Serial.println(millis());
+  rotaryEncoder.reset();
+}
+
+void rotary_loop()
+{
+	//dont print anything unless value changed
+	if (!rotaryEncoder.encoderChanged())
+	{
+		return;
+	}
+
+	Serial.print("Value: ");
+  DisplayTestVaribale = rotaryEncoder.readEncoder();
+	Serial.println(DisplayTestVaribale);
+}
+
 void setup() {
   pinMode(2, OUTPUT);
   digitalWrite(2, LOW);
@@ -272,9 +326,31 @@ void setup() {
   Serial.println("Sistema iniciado");
   delay(1000);
   UpdateMIDIMode(true, false);
+
+  	//we must initialize rotary encoder
+	rotaryEncoder.begin();
+
+	rotaryEncoder.setup(
+		[] { rotaryEncoder.readEncoder_ISR(); },
+		[] { rotary_onButtonClick(); });
+
+	//set boundaries and if values should cycle or not
+	//in this example we will set possible values between 0 and 1000;
+	bool circleValues = false;
+	rotaryEncoder.setBoundaries(0, 100, circleValues); //minValue, maxValue, circleValues true|false (when max go to min and vice versa)
+
+	/*Rotary acceleration introduced 25.2.2021.
+   * in case range to select is huge, for example - select a value between 0 and 1000 and we want 785
+   * without accelerateion you need long time to get to that number
+   * Using acceleration, faster you turn, faster will the value raise.
+   * For fine tuning slow down.
+   */
+	//rotaryEncoder.disableAcceleration(); //acceleration is now enabled by default - disable if you dont need it
+	rotaryEncoder.setAcceleration(10); //or set the value - larger number = more accelearation; 0 or 1 means disabled acceleration
 }
 
 void loop() {
-  delay(100);
+  rotary_loop();
+  MIDI.read();
   UpdateMIDIMode(false, true);
 }
