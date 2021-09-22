@@ -1,5 +1,5 @@
 #include <Arduino.h>
-#include <MIDI.h>
+#include <BLEMidi.h>
 #include <Wire.h>
 #include <Adafruit_I2CDevice.h>
 #include <Adafruit_GFX.h>
@@ -38,24 +38,25 @@ AiEsp32RotaryEncoder rotaryEncoder = AiEsp32RotaryEncoder(ROTARY_ENCODER_A_PIN, 
 #define SCREEN_ADDRESS 0x3C ///< See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32
 Adafruit_SSD1306 display(128 , 64, &Wire, -1);
 
+int TimeSinceDisplayUpdate = 0;
 int DisplayTestVaribale = 0;
-
-//ESP32 RX Pin RX2 Used:
-MIDI_CREATE_INSTANCE(HardwareSerial, Serial2, MIDI);
+int DutyBorder = 0;
 
 volatile int interruptCounter;
 hw_timer_t * timer = NULL;
 portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
 
 unsigned long bres1;       
-unsigned long note1freq;  
+unsigned long note1freq; 
+unsigned long note1speed;  
 unsigned char note1_duty;
 uint8_t note1_note;
 bool note1on = false;
 int note1toDisplay = 0;
 
 unsigned long bres2;       
-unsigned long note2freq;   
+unsigned long note2freq;  
+unsigned long note2speed;  
 unsigned char note2_duty;
 uint8_t note2_note;
 bool note2on = false;
@@ -63,6 +64,7 @@ int note2toDisplay = 0;
 
 unsigned long bres3;       
 unsigned long note3freq;   
+unsigned long note3speed; 
 unsigned char note3_duty;
 uint8_t note3_note;
 bool note3on = false;
@@ -71,6 +73,20 @@ int note3toDisplay = 0;
 void SetupMidi();
 void SetupInterrupts();
 void SetupDisplay();
+
+int GetOnTime(int freq)
+{
+	int on_time = 1;
+	if (freq < 700)  {on_time = 2;}
+	if (freq < 600)  {on_time = 2;}
+	if (freq < 500)  {on_time = 3;}
+	if (freq < 400)  {on_time = 3;}
+	if (freq < 300)  {on_time = 3;}
+	if (freq < 200)  {on_time = 4;}
+	if (freq < 100)  {on_time = 4;}
+	on_time = on_time * DutyBorder;
+	return on_time;
+}
 
 int PitchToFreq(int pitch)
 {	
@@ -82,15 +98,16 @@ int PitchToFreq(int pitch)
 	return freq;
 }
 
-void onNoteOn(byte channel, byte note, byte velocity)
+void onNoteOn(uint8_t channel, uint8_t note, uint8_t velocity, uint16_t timestamp)
 {
-  //Serial.printf("Received note on : channel %d, note %d, velocity %d (timestamp ms)\n", channel, note, velocity);
+  Serial.printf("Received note on : channel %d, note %d, velocity %d (timestamp %dms)\n", channel, note, velocity, timestamp);
   if (note1on == false)
   {
     note1on = true;
     note1freq = PitchToFreq(note);
     note1_note = note;
     note1toDisplay = note1freq;
+    note1speed = GetOnTime(note1freq);
   }
   else if (note2on == false)
   {
@@ -98,6 +115,7 @@ void onNoteOn(byte channel, byte note, byte velocity)
     note2freq = PitchToFreq(note); 
     note2_note = note;
     note2toDisplay = note2freq;
+    note2speed = GetOnTime(note2freq);
   }
   else if (note3on == false)
   {
@@ -105,40 +123,51 @@ void onNoteOn(byte channel, byte note, byte velocity)
     note3freq = PitchToFreq(note); 
     note3_note = note;
     note3toDisplay = note3freq;
+    note3speed = GetOnTime(note3freq);
   }
 }
 
-void onNoteOff(byte channel, byte note, byte velocity)
+void onNoteOff(uint8_t channel, uint8_t note, uint8_t velocity, uint16_t timestamp)
 {
-  //Serial.printf("Received note off : channel %d, note %d, velocity %d (timestamp ms)\n", channel, note, velocity);
-  if (note == note1_note)
+  if ((note == note1_note))
   {
     note1on = false;
     //note1toDisplay = 0;
+    Serial.print("note 1 off");
   }
-  if (note == note2_note)
+  if ((note == note2_note))
   {
     note2on = false;
     //note2toDisplay = 0;
   }
-  if (note == note3_note)
+  if ((note == note3_note))
   {
     note3on = false;
     //note3toDisplay = 0;
   }
 }
 
-void onControlChange(byte channel, byte note, byte velocity)
+void onControlChange(uint8_t channel, uint8_t controller, uint8_t value, uint16_t timestamp)
 {
-    Serial.printf("Received control change : channel %d, controller , value  (timestamp dms)\n", channel);
+    Serial.printf("Received control change : channel %d, controller %d, value %d (timestamp %dms)\n", channel, controller, value, timestamp);
+}
+
+void connected()
+{
+  Serial.println("Connected");
 }
 
 void SetupMidi()
 {
-  MIDI.begin(MIDI_CHANNEL_OMNI);
-  MIDI.setHandleNoteOn(onNoteOn); 
-  MIDI.setHandleNoteOff(onNoteOff);
-  MIDI.setHandleControlChange(onControlChange);  
+  BLEMidiServer.begin("Tesla Coil Interrupter");
+  BLEMidiServer.setOnConnectCallback(connected);
+  BLEMidiServer.setOnDisconnectCallback([](){     // To show how to make a callback with a lambda function
+    Serial.println("Disconnected");
+  });
+  BLEMidiServer.setNoteOnCallback(onNoteOn);
+  BLEMidiServer.setNoteOffCallback(onNoteOff);
+  BLEMidiServer.setControlChangeCallback(onControlChange);
+
 }
 
 void IRAM_ATTR onTimer() {
@@ -148,7 +177,7 @@ void IRAM_ATTR onTimer() {
     if(bres1 >= 100000)     
     {
       bres1 -= 100000;
-      note1_duty = 20;
+      note1_duty = note1speed;
     }
   }
   if(note2on==1)           
@@ -157,7 +186,7 @@ void IRAM_ATTR onTimer() {
     if(bres2 >= 100000)     
     {
       bres2 -= 100000;
-      note2_duty = 20;
+      note2_duty = note2speed;
     }
   }
   if(note3on==1)           
@@ -166,7 +195,7 @@ void IRAM_ATTR onTimer() {
     if(bres3 >= 100000)     
     {
       bres3 -= 100000;
-      note3_duty = 20;
+      note3_duty = note3speed;
     }
   }
 
@@ -263,7 +292,7 @@ void UpdateMIDIMode(bool DrawEntireDisplay, bool UptadeInfo)
     display.print((note3toDisplay));
     display.println(F(" Hz"));
     display.print(F("Var: "));
-    display.println(DisplayTestVaribale);
+    display.println(rotaryEncoder.readEncoder());
     display.display();
   }
 
@@ -310,10 +339,9 @@ void rotary_loop()
 	{
 		return;
 	}
-
+  DutyBorder = rotaryEncoder.readEncoder();
 	Serial.print("Value: ");
-  DisplayTestVaribale = rotaryEncoder.readEncoder();
-	Serial.println(DisplayTestVaribale);
+	Serial.println(rotaryEncoder.readEncoder());
 }
 
 void setup() {
@@ -337,7 +365,7 @@ void setup() {
 	//set boundaries and if values should cycle or not
 	//in this example we will set possible values between 0 and 1000;
 	bool circleValues = false;
-	rotaryEncoder.setBoundaries(0, 100, circleValues); //minValue, maxValue, circleValues true|false (when max go to min and vice versa)
+	rotaryEncoder.setBoundaries(0, 9, circleValues); //minValue, maxValue, circleValues true|false (when max go to min and vice versa)
 
 	/*Rotary acceleration introduced 25.2.2021.
    * in case range to select is huge, for example - select a value between 0 and 1000 and we want 785
@@ -351,6 +379,9 @@ void setup() {
 
 void loop() {
   rotary_loop();
-  MIDI.read();
-  UpdateMIDIMode(false, true);
+  if ((millis()-TimeSinceDisplayUpdate) >= 100)
+  {
+    TimeSinceDisplayUpdate = millis();
+    UpdateMIDIMode(false, true);
+  }
 }
