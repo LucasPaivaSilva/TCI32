@@ -41,6 +41,8 @@ Adafruit_SSD1306 display(128 , 64, &Wire, -1);
 int TimeSinceDisplayUpdate = 0;
 int DisplayTestVaribale = 0;
 int DutyBorder = 0;
+int SOCTimer = 0;
+int BaterrySOC = 0;
 
 volatile int interruptCounter;
 hw_timer_t * timer = NULL;
@@ -254,7 +256,10 @@ void UpdateMIDIMode(bool DrawEntireDisplay, bool UptadeInfo)
     display.setTextColor(SSD1306_WHITE);       
     display.setCursor(0,0);            
     display.println(F("TCI 0.5"));
-    display.println(F(""));
+    display.print(F("SOC:"));
+    display.print(BaterrySOC);
+    display.println(F("%"));
+
 
     display.print(F("Note1 > "));
     if (note1on)
@@ -344,6 +349,26 @@ void rotary_loop()
 	Serial.println(rotaryEncoder.readEncoder());
 }
 
+int getSOC()
+{
+  float BaterryVoltage = 0;
+  float SOC = 0;
+  int analogSampler = 0;
+  for (int x = 0; x<=2; x++)
+  {
+    analogSampler = analogSampler + analogRead(4);
+    Serial.println("Leitura!");
+    
+  }
+  analogSampler = analogSampler/3;
+  BaterryVoltage = ((analogSampler * 3.3)/2048);
+  Serial.println(BaterryVoltage);
+  SOC = 1- ((4.2 - BaterryVoltage));
+  SOC = 100 * SOC;
+  Serial.println(SOC);
+  return int(SOC);
+}
+
 void setup() {
   pinMode(2, OUTPUT);
   digitalWrite(2, LOW);
@@ -375,6 +400,8 @@ void setup() {
    */
 	//rotaryEncoder.disableAcceleration(); //acceleration is now enabled by default - disable if you dont need it
 	rotaryEncoder.setAcceleration(10); //or set the value - larger number = more accelearation; 0 or 1 means disabled acceleration
+
+  BaterrySOC = getSOC();
 }
 
 void loop() {
@@ -383,5 +410,10 @@ void loop() {
   {
     TimeSinceDisplayUpdate = millis();
     UpdateMIDIMode(false, true);
+    SOCTimer++;
+    if (SOCTimer>=100){
+        SOCTimer = 0;
+        BaterrySOC = getSOC();
+    }
   }
 }
