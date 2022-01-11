@@ -8,6 +8,7 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "driver/i2c.h"
+#include "driver/timer.h"
 
 #include "ssd1306_hal/io.h"
 #include "ssd1306.h"
@@ -17,6 +18,13 @@
 #define TAG "TCI32"
 
 rotary_encoder_t *encoder = NULL;
+
+#define TIMER_INTR_SEL TIMER_INTR_LEVEL  /*!< Timer level interrupt */
+#define TIMER_GROUP    TIMER_GROUP_0     /*!< Test on timer group 0 */
+#define TIMER_DIVIDER   80               /*!< Hardware timer clock divider, 80 to get 1MHz clock to timer */
+#define TIMER_SCALE    (TIMER_BASE_CLK / TIMER_DIVIDER)  /*!< used to calculate counter value */
+#define TIMER_FINE_ADJ   (0*(TIMER_BASE_CLK / TIMER_DIVIDER)/1000000) /*!< used to compensate alarm value */
+#define TIMER_INTERVAL0_SEC   (0.00001)   /*!< test interval for timer 0 */
 
 static xQueueHandle gpio_button_evt_queue = NULL;
 
@@ -29,6 +37,18 @@ const char *menuItems[] =
     "Settings",
 };
 
+// Essa func é chamada a cada 10us
+volatile int cnt = 0;
+void IRAM_ATTR timer_group0_isr(void *para){// timer group 0, ISR
+  int timer_idx = (int) para;
+  uint32_t intr_status = TIMERG0.int_st_timers.val;
+  if((intr_status & BIT(timer_idx)) && timer_idx == TIMER_0) {
+      TIMERG0.hw_timer[timer_idx].update = 1;
+      TIMERG0.int_clr_timers.t0 = 1;
+      TIMERG0.hw_timer[timer_idx].config.alarm_en = 1;
+      cnt++;
+  }
+}
 static void IRAM_ATTR gpio_button_isr_handler(void* arg)
 {
     uint32_t gpio_num = (uint32_t) arg;
@@ -148,6 +168,32 @@ void setupInterrupt(){
   //hook isr handler for specific gpio pin
   gpio_isr_handler_add(GPIO_NUM_32, gpio_button_isr_handler, (void*) GPIO_NUM_32);
 }
+
+void setupTimer(){
+    int timer_group = TIMER_GROUP_0;
+    int timer_idx = TIMER_0;
+    timer_config_t config;
+    config.alarm_en = 1;
+    config.auto_reload = 1;
+    config.counter_dir = TIMER_COUNT_UP;
+    config.divider = TIMER_DIVIDER;
+    config.intr_type = TIMER_INTR_SEL;
+    config.counter_en = TIMER_PAUSE;
+    /*Configure timer*/
+    timer_init(timer_group, timer_idx, &config);
+    /*Stop timer counter*/
+    timer_pause(timer_group, timer_idx);
+    /*Load counter value */
+    timer_set_counter_value(timer_group, timer_idx, 0x00000000ULL);
+    /*Set alarm value*/
+    timer_set_alarm_value(timer_group, timer_idx, (TIMER_INTERVAL0_SEC * TIMER_SCALE) - TIMER_FINE_ADJ);
+    /*Enable timer interrupt*/
+    timer_enable_intr(timer_group, timer_idx);
+    /*Set ISR handler*/
+    timer_isr_register(timer_group, timer_idx, timer_group0_isr, (void*) timer_idx, ESP_INTR_FLAG_IRAM, NULL);
+    /*Start timer counter*/
+    timer_start(timer_group, timer_idx);
+}
 ///////////////////////////////////////////////////////////////////////////////
 
 static void task_midi(void *pvParameters)
@@ -174,8 +220,14 @@ static void task_bms(void *pvParameters)
 static void task_mainOS(void *pvParameters)
 {
     uint8_t OS_State = 0;
+    uint32_t gpio_button_flag; 
+    bool button_flag = false;
     int encoderLastValue = encoder->get_counter_value(encoder);
     for (;;) {
+        if(xQueueReceive(gpio_button_evt_queue, &gpio_button_flag, 0)) {
+            xQueueReset(gpio_button_evt_queue);
+            button_flag = true;
+        }
         /*
         0 = Boot
         1 = Menu
@@ -193,6 +245,7 @@ static void task_mainOS(void *pvParameters)
             ssd1306_showMenu( &menu );   
             break;
         case 1:
+            // Menu
             if (encoder->get_counter_value(encoder) > encoderLastValue + 2) {
                 ssd1306_menuUp( &menu );
                 if (ssd1306_menuSelection(&menu) == 0){
@@ -207,16 +260,40 @@ static void task_mainOS(void *pvParameters)
                 encoderLastValue = encoder->get_counter_value(encoder);
             }
             ssd1306_showMenu( &menu ); 
-            // Menu
+            if (button_flag){
+              OS_State = ssd1306_menuSelection(&menu) + 1;
+              button_flag = false;
+            }
             break;
         case 2:
             // MIDI
+            ssd1306_clearScreen();
+            ssd1306_print("MIDI MODE");
+            if (button_flag){
+              OS_State = 1;
+              button_flag = false;
+              ssd1306_clearScreen();
+            }
             break;
         case 3:
             // Fixed
+            ssd1306_clearScreen();
+            ssd1306_print("FIXED MODE");
+            if (button_flag){
+              OS_State = 1;
+              button_flag = false;
+              ssd1306_clearScreen();
+            }
             break;
         case 4:
             // Settings
+            ssd1306_clearScreen();
+            ssd1306_print("SETTINGS MODE");
+            if (button_flag){
+              OS_State = 1;
+              button_flag = false;
+              ssd1306_clearScreen();
+            }
             break;
         default:
             break;
@@ -235,6 +312,7 @@ void app_main()
     setupGPIO();
     setupSSD1306();
     setupEncoder();
+    setupTimer();
     xTaskCreate(task_midi, "task_midi"  , 4096, NULL, 4, NULL);
     xTaskCreate(task_bms, "task_bms"  , 4096, NULL, 3, NULL);
     xTaskCreate(task_mainOS, "task_mainOS", 4096, NULL, 8, NULL);
