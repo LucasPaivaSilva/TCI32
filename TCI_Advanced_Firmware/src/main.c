@@ -18,6 +18,8 @@
 
 rotary_encoder_t *encoder = NULL;
 
+static xQueueHandle gpio_button_evt_queue = NULL;
+
 SAppMenu menu;
 const char *menuItems[] =
 {
@@ -26,6 +28,12 @@ const char *menuItems[] =
     "Fixed Mode",
     "Settings",
 };
+
+static void IRAM_ATTR gpio_button_isr_handler(void* arg)
+{
+    uint32_t gpio_num = (uint32_t) arg;
+    xQueueSendFromISR(gpio_button_evt_queue, &gpio_num, NULL);
+}
 
 void uartmidi_receive_message_callback(uint8_t uartmidi_port, uint8_t midi_status, uint8_t *remaining_message, size_t len, size_t continued_sysex_pos)
 {
@@ -61,25 +69,43 @@ void uartmidi_receive_message_callback(uint8_t uartmidi_port, uint8_t midi_statu
 
 void setupGPIO() {
     // This funcition confiure the GPIO 
+    gpio_config_t io_conf;
 
     //----------------------------------//
     // Enable GPIO2 as OUTPUT
     // This is the GPIO pin that is connected to the LED on the ESP32 DEV Board
-    gpio_config_t io_conf;
-    //disable interrupt
+    // This is also the pin used to control the Tesla Coil Driver
+    // Disable interrupt
     io_conf.intr_type = GPIO_PIN_INTR_DISABLE;
-    //set as output mode
+    // Set as output mode
     io_conf.mode = GPIO_MODE_OUTPUT;
-    //Selects GPIO 2
+    // Selects GPIO 2
     io_conf.pin_bit_mask = (1ULL<<02);
-    //disable pull-down mode
+    // Disable pull-down mode
     io_conf.pull_down_en = 0;
-    //disable pull-up mode
+    // Disable pull-up mode
     io_conf.pull_up_en = 0;
-    //configure GPIO with the given settings
+    // Configure GPIO with the given settings
     gpio_config(&io_conf);
-    //----------------------------------//  
-    gpio_set_level(GPIO_NUM_2, 0); 
+    // Makes sure that GPIO2 is on Low (important to not fire the TC)
+    gpio_set_level(GPIO_NUM_2, 0);
+    //----------------------------------// 
+
+    //----------------------------------//
+    // Enable GPI32 as INPUT
+    // Interrupt of rising edge
+    io_conf.intr_type = GPIO_INTR_POSEDGE;
+    // Set as input mode
+    io_conf.mode = GPIO_MODE_INPUT;
+    //bit mask of the pins, use GPIO4/5 here
+    io_conf.pin_bit_mask = (1ULL<<32);
+    //enable pull-up mode
+    io_conf.pull_up_en = 1;
+    // Configure GPIO with the given settings
+    gpio_config(&io_conf); 
+    //----------------------------------// 
+
+
 }
 
 void setupSSD1306(){
@@ -112,6 +138,15 @@ void setupEncoder(){
 
     // Start encoder
     ESP_ERROR_CHECK(encoder->start(encoder));
+}
+
+void setupInterrupt(){
+  //create a queue to handle gpio event from isr
+  gpio_button_evt_queue = xQueueCreate(10, sizeof(uint32_t));
+  //install gpio isr service
+  gpio_install_isr_service(0);
+  //hook isr handler for specific gpio pin
+  gpio_isr_handler_add(GPIO_NUM_32, gpio_button_isr_handler, (void*) GPIO_NUM_32);
 }
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -196,6 +231,7 @@ static void task_mainOS(void *pvParameters)
 
 void app_main()
 {
+    setupInterrupt();
     setupGPIO();
     setupSSD1306();
     setupEncoder();
