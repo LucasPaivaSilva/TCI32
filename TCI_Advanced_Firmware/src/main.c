@@ -37,8 +37,21 @@ const char *menuItems[] =
     "Settings",
 };
 
+#define bresFreq 100000 // 1/timer_interval0_sec
+#define speedTest 10 
+
+volatile unsigned long bres1 = 0;
+volatile int note1Freq = 0;
+volatile unsigned char note1Duty = 0;
+bool note1On = false;
+
+volatile unsigned long bres2 = 0;
+volatile unsigned long note2Freq = 0;
+volatile unsigned char note2Duty = 0;
+bool note2On = false;
+
 // Essa func é chamada a cada 10us
-volatile int cnt = 0;
+
 void IRAM_ATTR timer_group0_isr(void *para){// timer group 0, ISR
   int timer_idx = (int) para;
   uint32_t intr_status = TIMERG0.int_st_timers.val;
@@ -46,9 +59,48 @@ void IRAM_ATTR timer_group0_isr(void *para){// timer group 0, ISR
       TIMERG0.hw_timer[timer_idx].update = 1;
       TIMERG0.int_clr_timers.t0 = 1;
       TIMERG0.hw_timer[timer_idx].config.alarm_en = 1;
-      cnt++;
+      ////////// Bres /////////////
+      // This is kinda advanced, whe are using the bresenham timing system to generete multiple notes, the bresFreq is 100kHz (10us)
+      if(note1On)           
+      {
+        bres1 += note1Freq;    
+        if(bres1 >= bresFreq)     
+        {
+          bres1 -= bresFreq;
+          note1Duty = speedTest;
+        }
+      }
+      if(note2On)           
+      {
+        bres2 += note2Freq;    
+        if(bres2 >= bresFreq)     
+        {
+          bres2 -= bresFreq;
+          note2Duty = speedTest;
+        }
+      }
+
+
+      if(note1Duty || note2Duty)
+      {
+        if (note1Duty)
+        {
+          note1Duty--;
+        }
+        if (note2Duty)
+        {
+          note2Duty--;
+        }
+        gpio_set_level(GPIO_NUM_2, 1);
+      }
+      else
+      {
+        gpio_set_level(GPIO_NUM_2, 0);
+      } 
+
   }
 }
+
 static void IRAM_ATTR gpio_button_isr_handler(void* arg)
 {
     uint32_t gpio_num = (uint32_t) arg;
@@ -221,6 +273,7 @@ static void task_mainOS(void *pvParameters)
 {
     uint8_t OS_State = 0;
     uint32_t gpio_button_flag; 
+    char displayBuffer[256];
     bool button_flag = false;
     int encoderLastValue = encoder->get_counter_value(encoder);
     for (;;) {
@@ -246,13 +299,13 @@ static void task_mainOS(void *pvParameters)
             break;
         case 1:
             // Menu
-            if (encoder->get_counter_value(encoder) > encoderLastValue + 2) {
+            if (encoder->get_counter_value(encoder) > encoderLastValue) {
                 ssd1306_menuUp( &menu );
                 if (ssd1306_menuSelection(&menu) == 0){
                     ssd1306_menuUp( &menu );
                 }
                 encoderLastValue = encoder->get_counter_value(encoder);
-            } else if (encoder->get_counter_value(encoder) < encoderLastValue - 2) {
+            } else if (encoder->get_counter_value(encoder) < encoderLastValue) {
                 if (ssd1306_menuSelection(&menu) == 3){
                     ssd1306_menuDown( &menu );
                 }
@@ -263,12 +316,35 @@ static void task_mainOS(void *pvParameters)
             if (button_flag){
               OS_State = ssd1306_menuSelection(&menu) + 1;
               button_flag = false;
+              ssd1306_clearScreen();
             }
             break;
         case 2:
             // MIDI
-            ssd1306_clearScreen();
-            ssd1306_print("MIDI MODE");
+            ssd1306_setCursor(0, 0);
+            ssd1306_print("MIDI Mode");
+            ssd1306_setCursor(0, 8);
+            ssd1306_print("SOC: ");
+            ssd1306_drawRect(0, 16, 128 - 4, 64 - 4); 
+            ssd1306_setCursor(24, 24);
+            ssd1306_print("Note1: ");
+            sprintf(displayBuffer, "%d", note1Freq);
+            ssd1306_print(displayBuffer);
+            ssd1306_print("  ");
+            ssd1306_setCursor(80, 24);
+            ssd1306_print("Hz");
+            ssd1306_setCursor(24, 32);
+            ssd1306_print("Note2: ");
+            sprintf(displayBuffer, "%d", note1Freq);
+            ssd1306_print(displayBuffer);
+            ssd1306_print("  ");
+            ssd1306_setCursor(80, 32);
+            ssd1306_print("Hz");
+            ssd1306_setCursor(24, 40);
+            ssd1306_print("Power: ");
+            sprintf(displayBuffer, "%d", 100);
+            ssd1306_print(displayBuffer);
+            ssd1306_print(" %");
             if (button_flag){
               OS_State = 1;
               button_flag = false;
@@ -277,9 +353,40 @@ static void task_mainOS(void *pvParameters)
             break;
         case 3:
             // Fixed
-            ssd1306_clearScreen();
-            ssd1306_print("FIXED MODE");
+            note1On = true;
+            if (encoder->get_counter_value(encoder) > encoderLastValue) {
+              note1Freq += ((encoder->get_counter_value(encoder) - encoderLastValue) * -5);
+              if (note1Freq<0){
+                note1Freq = 0;
+              }
+              encoderLastValue = encoder->get_counter_value(encoder);
+            } else if (encoder->get_counter_value(encoder) < encoderLastValue) {
+              note1Freq += ((encoder->get_counter_value(encoder) - encoderLastValue) * -5);
+              if (note1Freq>700){
+                note1Freq = 700;
+              }
+              encoderLastValue = encoder->get_counter_value(encoder);
+            }
+            ssd1306_setCursor(0, 0);
+            ssd1306_print("Fixed Mode");
+            ssd1306_setCursor(0, 8);
+            ssd1306_print("SOC: ");
+            ssd1306_drawRect(0, 16, 128 - 4, 64 - 4); 
+            ssd1306_setCursor(24, 24);
+            ssd1306_print("Freq: ");
+            sprintf(displayBuffer, "%d", note1Freq);
+            ssd1306_print(displayBuffer);
+            ssd1306_print("  ");
+            ssd1306_setCursor(80, 24);
+            ssd1306_print("Hz");
+            ssd1306_setCursor(24, 40);
+            ssd1306_print("Power: ");
+            sprintf(displayBuffer, "%d", 100);
+            ssd1306_print(displayBuffer);
+            ssd1306_print(" %");
+
             if (button_flag){
+              note1On = false;
               OS_State = 1;
               button_flag = false;
               ssd1306_clearScreen();
