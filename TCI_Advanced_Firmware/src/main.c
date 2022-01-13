@@ -39,6 +39,7 @@ const char *menuItems[] =
 
 #define bresFreq 100000 // 1/timer_interval0_sec
 #define speedTest 10 
+volatile int masterDuty = 0;
 
 volatile unsigned long bres1 = 0;
 volatile int note1Freq = 0;
@@ -112,7 +113,7 @@ void uartmidi_receive_message_callback(uint8_t uartmidi_port, uint8_t midi_statu
   // enable to print out debug messages
   ESP_LOGI(TAG, "receive_message CALLBACK uartmidi_port=%d, midi_status=0x%02x, len=%d, continued_sysex_pos=%d, remaining_message:", uartmidi_port, midi_status, len, continued_sysex_pos);
   esp_log_buffer_hex(TAG, remaining_message, len);
-
+  note1Freq = midi_status;
   // loopback received message
   {
     // TODO: more comfortable packet creation via special APIs
@@ -321,6 +322,19 @@ static void task_mainOS(void *pvParameters)
             break;
         case 2:
             // MIDI
+            if (encoder->get_counter_value(encoder) > encoderLastValue) {
+              masterDuty += -1*((encoder->get_counter_value(encoder) - encoderLastValue))/2;
+              if (masterDuty<0){
+                masterDuty = 0;
+              }
+              encoderLastValue = encoder->get_counter_value(encoder);
+            } else if (encoder->get_counter_value(encoder) < encoderLastValue) {
+              masterDuty += -1*((encoder->get_counter_value(encoder) - encoderLastValue))/2;
+              if (masterDuty>10){
+                masterDuty = 10;
+              }
+              encoderLastValue = encoder->get_counter_value(encoder);
+            }
             ssd1306_setCursor(0, 0);
             ssd1306_print("MIDI Mode");
             ssd1306_setCursor(0, 8);
@@ -331,20 +345,22 @@ static void task_mainOS(void *pvParameters)
             sprintf(displayBuffer, "%d", note1Freq);
             ssd1306_print(displayBuffer);
             ssd1306_print("  ");
-            ssd1306_setCursor(80, 24);
+            ssd1306_setCursor(86, 24);
             ssd1306_print("Hz");
             ssd1306_setCursor(24, 32);
             ssd1306_print("Note2: ");
             sprintf(displayBuffer, "%d", note1Freq);
             ssd1306_print(displayBuffer);
             ssd1306_print("  ");
-            ssd1306_setCursor(80, 32);
+            ssd1306_setCursor(86, 32);
             ssd1306_print("Hz");
             ssd1306_setCursor(24, 40);
             ssd1306_print("Power: ");
-            sprintf(displayBuffer, "%d", 100);
+            sprintf(displayBuffer, "%d", masterDuty * 10);
             ssd1306_print(displayBuffer);
-            ssd1306_print(" %");
+            ssd1306_print("  ");
+            ssd1306_setCursor(86, 40);
+            ssd1306_print("%");
             if (button_flag){
               OS_State = 1;
               button_flag = false;
