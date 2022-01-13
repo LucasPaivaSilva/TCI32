@@ -9,6 +9,7 @@
 #include "esp_log.h"
 #include "driver/i2c.h"
 #include "driver/timer.h"
+#include <math.h>
 
 #include "ssd1306_hal/io.h"
 #include "ssd1306.h"
@@ -43,11 +44,13 @@ volatile int masterDuty = 0;
 
 volatile unsigned long bres1 = 0;
 volatile int note1Freq = 0;
+volatile int note1Note = 0;
 volatile unsigned char note1Duty = 0;
 bool note1On = false;
 
 volatile unsigned long bres2 = 0;
-volatile unsigned long note2Freq = 0;
+volatile int note2Freq = 0;
+volatile int note2Note = 0;
 volatile unsigned char note2Duty = 0;
 bool note2On = false;
 
@@ -108,13 +111,66 @@ static void IRAM_ATTR gpio_button_isr_handler(void* arg)
     xQueueSendFromISR(gpio_button_evt_queue, &gpio_num, NULL);
 }
 
+int PitchToFreq(uint8_t pitch)
+{	
+  int freq = (int) (220.0 * pow(pow(2.0, 1.0/12.0), pitch - 57) + 0.5);
+  if (freq>700)
+  {
+    return 700;
+  }
+	return freq;
+}
+
+void processReceivedMidiPacket(uint8_t *data, uint8_t size)
+{
+    // printf("Received data : ");
+    // for(uint8_t i=0; i<size; i++)
+    //     printf("%x ", data[i]);
+    // printf(" - %d ", data[0]);
+    // printf("\n");
+    uint8_t *ptr = &data[1];
+    uint8_t note = ptr[0];
+    uint8_t velocity = ptr[1];
+    switch (data[0])
+    {
+    case 128: ;
+      printf("Note Off, note %d, velocity %d", note, velocity);
+      if (note == note1Note){
+        note1On = false;
+      }
+      if (note == note2Note){
+        note2On = false;
+      }
+      break;
+    case 144: ;
+      printf("Note On, note %d, velocity %d", note, velocity);
+      if (note1On == false)
+      {
+        note1On = true;
+        note1Note = note;
+        note1Freq = PitchToFreq(note);
+        note1Duty = speedTest;
+      }
+      else if (note2On == false)
+      {
+        note2On = true;
+        note2Note = note;
+        note2Freq = PitchToFreq(note);
+        note2Duty = speedTest;
+      }
+      break;
+    
+    default:
+      break;
+    }
+}
+
 void uartmidi_receive_message_callback(uint8_t uartmidi_port, uint8_t midi_status, uint8_t *remaining_message, size_t len, size_t continued_sysex_pos)
 {
   // enable to print out debug messages
   ESP_LOGI(TAG, "receive_message CALLBACK uartmidi_port=%d, midi_status=0x%02x, len=%d, continued_sysex_pos=%d, remaining_message:", uartmidi_port, midi_status, len, continued_sysex_pos);
   esp_log_buffer_hex(TAG, remaining_message, len);
-  note1Freq = midi_status;
-  // loopback received message
+  //printf("Status recebido: %d | Len: %d\n", midi_status, len);
   {
     // TODO: more comfortable packet creation via special APIs
 
@@ -123,6 +179,7 @@ void uartmidi_receive_message_callback(uint8_t uartmidi_port, uint8_t midi_statu
 
     if( midi_status == 0xf0 && continued_sysex_pos > 0 ) {
       uartmidi_send_message(0, remaining_message, len); // just forward
+      processReceivedMidiPacket(remaining_message, len);
     } else {
       size_t loopback_packet_len = 1 + len; // includes MIDI status and remaining bytes
       uint8_t *loopback_packet = (uint8_t *)malloc(loopback_packet_len * sizeof(uint8_t));
@@ -133,11 +190,14 @@ void uartmidi_receive_message_callback(uint8_t uartmidi_port, uint8_t midi_statu
         memcpy(&loopback_packet[1], remaining_message, len);
 
         uartmidi_send_message(uartmidi_port, loopback_packet, loopback_packet_len);
+        processReceivedMidiPacket(loopback_packet, loopback_packet_len);
 
         free(loopback_packet);
       }
     }
   }
+  
+  
 }
 
 void setupGPIO() {
@@ -349,7 +409,7 @@ static void task_mainOS(void *pvParameters)
             ssd1306_print("Hz");
             ssd1306_setCursor(24, 32);
             ssd1306_print("Note2: ");
-            sprintf(displayBuffer, "%d", note1Freq);
+            sprintf(displayBuffer, "%d", note2Freq);
             ssd1306_print(displayBuffer);
             ssd1306_print("  ");
             ssd1306_setCursor(86, 32);
