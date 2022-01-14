@@ -38,20 +38,21 @@ const char *menuItems[] =
     "Settings",
 };
 
-#define bresFreq 100000 // 1/timer_interval0_sec
-#define speedTest 10 
+#define bresFreq 100000 // 1/timer_interval0_sec 
 volatile int masterDuty = 0;
 
 volatile unsigned long bres1 = 0;
 volatile int note1Freq = 0;
 volatile int note1Note = 0;
 volatile unsigned char note1Duty = 0;
+volatile unsigned char note1DutyMaster = 0;
 bool note1On = false;
 
 volatile unsigned long bres2 = 0;
 volatile int note2Freq = 0;
 volatile int note2Note = 0;
 volatile unsigned char note2Duty = 0;
+volatile unsigned char note2DutyMaster = 0;
 bool note2On = false;
 
 // Essa func é chamada a cada 10us
@@ -71,7 +72,7 @@ void IRAM_ATTR timer_group0_isr(void *para){// timer group 0, ISR
         if(bres1 >= bresFreq)     
         {
           bres1 -= bresFreq;
-          note1Duty = speedTest;
+          note1Duty = note1DutyMaster;
         }
       }
       if(note2On)           
@@ -80,7 +81,7 @@ void IRAM_ATTR timer_group0_isr(void *para){// timer group 0, ISR
         if(bres2 >= bresFreq)     
         {
           bres2 -= bresFreq;
-          note2Duty = speedTest;
+          note2Duty = note2DutyMaster;
         }
       }
 
@@ -109,6 +110,20 @@ static void IRAM_ATTR gpio_button_isr_handler(void* arg)
 {
     uint32_t gpio_num = (uint32_t) arg;
     xQueueSendFromISR(gpio_button_evt_queue, &gpio_num, NULL);
+}
+
+int GetOnTime(int freq)
+{
+	int on_time = 1;
+	if (freq < 700)  {on_time = 1;}
+	if (freq < 600)  {on_time = 1;}
+	if (freq < 500)  {on_time = 2;}
+	if (freq < 400)  {on_time = 2;}
+	if (freq < 300)  {on_time = 3;}
+	if (freq < 200)  {on_time = 3;}
+	if (freq < 100)  {on_time = 3;}
+	on_time = on_time * masterDuty;
+	return on_time;
 }
 
 int PitchToFreq(uint8_t pitch)
@@ -149,14 +164,14 @@ void processReceivedMidiPacket(uint8_t *data, uint8_t size)
         note1On = true;
         note1Note = note;
         note1Freq = PitchToFreq(note);
-        note1Duty = speedTest;
+        note1DutyMaster = GetOnTime(note1Freq);
       }
       else if (note2On == false)
       {
         note2On = true;
         note2Note = note;
         note2Freq = PitchToFreq(note);
-        note2Duty = speedTest;
+        note2DutyMaster = GetOnTime(note2Freq);
       }
       break;
     
@@ -402,14 +417,24 @@ static void task_mainOS(void *pvParameters)
             ssd1306_drawRect(0, 16, 128 - 4, 64 - 4); 
             ssd1306_setCursor(24, 24);
             ssd1306_print("Note1: ");
-            sprintf(displayBuffer, "%d", note1Freq);
+            if (note1On){
+              sprintf(displayBuffer, "%d", note1Freq);
+            }
+            else{
+              sprintf(displayBuffer, "%d", 0);
+            }
             ssd1306_print(displayBuffer);
             ssd1306_print("  ");
             ssd1306_setCursor(86, 24);
             ssd1306_print("Hz");
             ssd1306_setCursor(24, 32);
             ssd1306_print("Note2: ");
-            sprintf(displayBuffer, "%d", note2Freq);
+            if (note2On){
+              sprintf(displayBuffer, "%d", note2Freq);
+            }
+            else{
+              sprintf(displayBuffer, "%d", 0);
+            }
             ssd1306_print(displayBuffer);
             ssd1306_print("  ");
             ssd1306_setCursor(86, 32);
