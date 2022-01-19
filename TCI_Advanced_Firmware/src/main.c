@@ -138,18 +138,18 @@ int PitchToFreq(uint8_t pitch)
 
 void processReceivedMidiPacket(uint8_t *data, uint8_t size)
 {
-    // printf("Received data : ");
-    // for(uint8_t i=0; i<size; i++)
-    //     printf("%x ", data[i]);
-    // printf(" - %d ", data[0]);
-    // printf("\n");
+    printf("Received data : ");
+    for(uint8_t i=0; i<size; i++)
+        printf("%x ", data[i]);
+    printf(" - %d ", data[0]);
+    printf("-");
     uint8_t *ptr = &data[1];
     uint8_t note = ptr[0];
     uint8_t velocity = ptr[1];
     switch (data[0])
     {
     case 128: ;
-      printf("Note Off, note %d, velocity %d", note, velocity);
+      printf(" - Note Off, note %d, velocity %d\n", note, velocity);
       if (note == note1Note){
         note1On = false;
       }
@@ -158,13 +158,14 @@ void processReceivedMidiPacket(uint8_t *data, uint8_t size)
       }
       break;
     case 144: ;
-      printf("Note On, note %d, velocity %d", note, velocity);
+      printf(" - Note On, note %d, velocity %d\n", note, velocity);
       if (note1On == false)
       {
         note1On = true;
         note1Note = note;
         note1Freq = PitchToFreq(note);
         note1DutyMaster = GetOnTime(note1Freq);
+        note1DutyMaster = 20;
       }
       else if (note2On == false)
       {
@@ -172,6 +173,7 @@ void processReceivedMidiPacket(uint8_t *data, uint8_t size)
         note2Note = note;
         note2Freq = PitchToFreq(note);
         note2DutyMaster = GetOnTime(note2Freq);
+        note2DutyMaster = 20;
       }
       break;
     
@@ -182,9 +184,13 @@ void processReceivedMidiPacket(uint8_t *data, uint8_t size)
 
 void uartmidi_receive_message_callback(uint8_t uartmidi_port, uint8_t midi_status, uint8_t *remaining_message, size_t len, size_t continued_sysex_pos)
 {
+  printf("Received data : ");
+    for(uint8_t i=0; i<len+1; i++)
+        printf("%x ", remaining_message[i]);
+  printf("-");
   // enable to print out debug messages
-  ESP_LOGI(TAG, "receive_message CALLBACK uartmidi_port=%d, midi_status=0x%02x, len=%d, continued_sysex_pos=%d, remaining_message:", uartmidi_port, midi_status, len, continued_sysex_pos);
-  esp_log_buffer_hex(TAG, remaining_message, len);
+  // ESP_LOGI(TAG, "receive_message CALLBACK uartmidi_port=%d, midi_status=0x%02x, len=%d, continued_sysex_pos=%d, remaining_message:", uartmidi_port, midi_status, len, continued_sysex_pos);
+  // esp_log_buffer_hex(TAG, remaining_message, len);
   //printf("Status recebido: %d | Len: %d\n", midi_status, len);
   {
     // TODO: more comfortable packet creation via special APIs
@@ -455,6 +461,7 @@ static void task_mainOS(void *pvParameters)
         case 3:
             // Fixed
             note1On = true;
+            note1DutyMaster = 10;
             if (encoder->get_counter_value(encoder) > encoderLastValue) {
               note1Freq += ((encoder->get_counter_value(encoder) - encoderLastValue) * -5);
               if (note1Freq<0){
