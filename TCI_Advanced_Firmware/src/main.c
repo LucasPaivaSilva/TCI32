@@ -165,7 +165,6 @@ void processReceivedMidiPacket(uint8_t *data, uint8_t size)
         note1Note = note;
         note1Freq = PitchToFreq(note);
         note1DutyMaster = GetOnTime(note1Freq);
-        note1DutyMaster = 20;
       }
       else if (note2On == false)
       {
@@ -173,7 +172,6 @@ void processReceivedMidiPacket(uint8_t *data, uint8_t size)
         note2Note = note;
         note2Freq = PitchToFreq(note);
         note2DutyMaster = GetOnTime(note2Freq);
-        note2DutyMaster = 20;
       }
       break;
     
