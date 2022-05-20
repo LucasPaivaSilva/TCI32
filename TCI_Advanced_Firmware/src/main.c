@@ -43,15 +43,15 @@ const char *menuItems[] =
 #define bresFreq 100000 // 1/timer_interval0_sec 
 volatile int masterDuty = 0;
 
-volatile unsigned long bres1 = 0;
-volatile int note1Freq = 0;
+volatile float bres1 = 0;
+volatile float note1Freq = 0;
 volatile int note1Note = 0;
 volatile unsigned char note1Duty = 0;
 volatile unsigned char note1DutyMaster = 0;
 bool note1On = false;
 
-volatile unsigned long bres2 = 0;
-volatile int note2Freq = 0;
+volatile float bres2 = 0;
+volatile float note2Freq = 0;
 volatile int note2Note = 0;
 volatile unsigned char note2Duty = 0;
 volatile unsigned char note2DutyMaster = 0;
@@ -128,9 +128,9 @@ int GetOnTime(int freq)
 	return on_time;
 }
 
-int PitchToFreq(uint8_t pitch)
+float PitchToFreq(uint8_t pitch)
 {	
-  int freq = pitchTable[pitch];
+  float freq = pitchTable[pitch];
   if (freq>700)
   {
     return 700;
@@ -436,7 +436,7 @@ static void task_mainOS(void *pvParameters)
             ssd1306_setCursor(24, 24);
             ssd1306_print("Note1: ");
             if (note1On){
-              sprintf(displayBuffer, "%d", note1Freq);
+              sprintf(displayBuffer, "%f", note1Freq);
             }
             else{
               sprintf(displayBuffer, "%d", 0);
@@ -448,7 +448,7 @@ static void task_mainOS(void *pvParameters)
             ssd1306_setCursor(24, 32);
             ssd1306_print("Note2: ");
             if (note2On){
-              sprintf(displayBuffer, "%d", note2Freq);
+              sprintf(displayBuffer, "%f", note2Freq);
             }
             else{
               sprintf(displayBuffer, "%d", 0);
@@ -494,7 +494,7 @@ static void task_mainOS(void *pvParameters)
             ssd1306_drawRect(0, 16, 128 - 4, 64 - 4); 
             ssd1306_setCursor(24, 24);
             ssd1306_print("Freq: ");
-            sprintf(displayBuffer, "%d", note1Freq);
+            sprintf(displayBuffer, "%f", note1Freq);
             ssd1306_print(displayBuffer);
             ssd1306_print("  ");
             ssd1306_setCursor(80, 24);
