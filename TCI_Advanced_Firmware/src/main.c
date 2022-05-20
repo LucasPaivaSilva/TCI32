@@ -27,7 +27,9 @@ rotary_encoder_t *encoder = NULL;
 #define TIMER_FINE_ADJ   (0*(TIMER_BASE_CLK / TIMER_DIVIDER)/1000000) /*!< used to compensate alarm value */
 #define TIMER_INTERVAL0_SEC   (0.00001)   /*!< test interval for timer 0 */
 
+
 static xQueueHandle gpio_button_evt_queue = NULL;
+float pitchTable[] = {8.18, 8.66, 9.18, 9.72, 10.30, 10.91, 11.56, 12.25, 12.98, 13.75, 14.57, 15.43, 16.35, 17.32, 18.35, 19.45, 20.60, 21.83, 23.12, 24.50, 25.96, 27.50, 29.14, 30.87, 32.70, 34.65, 36.71, 38.89, 41.20, 43.65, 46.25, 49.00, 51.91, 55.00, 58.27, 61.74, 65.41, 69.30, 73.42, 77.78, 82.41, 87.31, 92.50, 98.00, 103.8, 110.0, 116.5, 123.5, 130.8, 138.6, 146.8, 155.6, 164.8, 174.6, 185.0, 196.0, 207.7, 220.0, 233.1, 246.9, 261.6, 277.2, 293.7, 311.1, 329.6, 349.2, 370.0, 392.0, 415.3, 440.0, 466.2, 493.9, 523.3, 554.4, 587.3, 622.3, 659.3, 698.5, 740.0, 784.0, 830.6, 880.0, 932.3, 987.8, 1047, 1109, 1175, 1245, 1319, 1397, 1480, 1568, 1661, 1760, 1865, 1976, 2093, 2217, 2349, 2489, 2637, 2794, 2960, 3136, 3322, 3520, 3729, 3951, 4186, 4435, 4699, 4978, 5274, 5588, 5920, 6272, 6645, 7040, 7459, 7902, 8372, 8869, 9397, 9956, 10548, 11175, 11840, 12544, 13290, 14080, 14917, 15804, 16744, 17740, 18795, 19912, 21096, 22350, 23679, 25088, 26579, 28160, 29834, 31608, 33505, 35428, 37480, 39680, 420};
 
 SAppMenu menu;
 const char *menuItems[] =
@@ -128,7 +130,7 @@ int GetOnTime(int freq)
 
 int PitchToFreq(uint8_t pitch)
 {	
-  int freq = (int) (220.0 * pow(pow(2.0, 1.0/12.0), pitch - 57) + 0.5);
+  int freq = pitchTable[pitch];
   if (freq>700)
   {
     return 700;
@@ -158,20 +160,35 @@ void processReceivedMidiPacket(uint8_t *data, uint8_t size)
       }
       break;
     case 144: ;
-      printf(" - Note On, note %d, velocity %d\n", note, velocity);
-      if (note1On == false)
+      if (velocity != 0)
       {
-        note1On = true;
-        note1Note = note;
-        note1Freq = PitchToFreq(note);
-        note1DutyMaster = GetOnTime(note1Freq);
+        printf(" - Note On, note %d, velocity %d\n", note, velocity);
+        if (note1On == false)
+        {
+          note1On = true;
+          note1Note = note;
+          note1Freq = PitchToFreq(note);
+          note1DutyMaster = GetOnTime(note1Freq);
+        }
+        else if (note2On == false)
+        {
+          note2On = true;
+          note2Note = note;
+          note2Freq = PitchToFreq(note);
+          note2DutyMaster = GetOnTime(note2Freq);
+        }
       }
-      else if (note2On == false)
+      else
       {
-        note2On = true;
-        note2Note = note;
-        note2Freq = PitchToFreq(note);
-        note2DutyMaster = GetOnTime(note2Freq);
+        printf(" - Note Off, note %d, velocity %d\n", note, velocity);
+        if (note == note1Note)
+        {
+          note1On = false;
+        }
+        if (note == note2Note)
+        {
+          note2On = false;
+        }
       }
       break;
     
@@ -197,7 +214,6 @@ void uartmidi_receive_message_callback(uint8_t uartmidi_port, uint8_t midi_statu
     // this shows that running status is maintained, and that SysEx streams work as well
 
     if( midi_status == 0xf0 && continued_sysex_pos > 0 ) {
-      uartmidi_send_message(0, remaining_message, len); // just forward
       processReceivedMidiPacket(remaining_message, len);
     } else {
       size_t loopback_packet_len = 1 + len; // includes MIDI status and remaining bytes
@@ -207,8 +223,6 @@ void uartmidi_receive_message_callback(uint8_t uartmidi_port, uint8_t midi_statu
       } else {
         loopback_packet[0] = midi_status;
         memcpy(&loopback_packet[1], remaining_message, len);
-
-        uartmidi_send_message(uartmidi_port, loopback_packet, loopback_packet_len);
         processReceivedMidiPacket(loopback_packet, loopback_packet_len);
 
         free(loopback_packet);
@@ -511,7 +525,7 @@ static void task_mainOS(void *pvParameters)
         default:
             break;
         }
-        vTaskDelay(100 / portTICK_RATE_MS);
+        vTaskDelay(10 / portTICK_RATE_MS);
     }
 }
 

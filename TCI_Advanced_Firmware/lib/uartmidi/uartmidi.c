@@ -215,7 +215,7 @@ int32_t uartmidi_enable_port(uint8_t uartmidi_port, uint32_t baudrate)
 
   if( uartmidi_port >= UARTMIDI_NUM_PORTS )
     return -1; // invalid port
-
+ 
   uartmidi_handle_t *uart = &uartmidi_handle[uartmidi_port];
 
   switch( uartmidi_port ) {
