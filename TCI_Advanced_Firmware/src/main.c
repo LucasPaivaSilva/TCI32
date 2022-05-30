@@ -43,15 +43,15 @@ const char *menuItems[] =
 #define bresFreq 100000 // 1/timer_interval0_sec 
 volatile int masterDuty = 0;
 
-volatile float bres1 = 0;
-volatile float note1Freq = 0;
+volatile int bres1 = 0;
+volatile int note1Freq = 0;
 volatile int note1Note = 0;
 volatile unsigned char note1Duty = 0;
 volatile unsigned char note1DutyMaster = 0;
 bool note1On = false;
 
-volatile float bres2 = 0;
-volatile float note2Freq = 0;
+volatile int bres2 = 0;
+volatile int note2Freq = 0;
 volatile int note2Note = 0;
 volatile unsigned char note2Duty = 0;
 volatile unsigned char note2DutyMaster = 0;
@@ -128,9 +128,9 @@ int GetOnTime(int freq)
 	return on_time;
 }
 
-float PitchToFreq(uint8_t pitch)
+int PitchToFreq(uint8_t pitch)
 {	
-  float freq = pitchTable[pitch];
+  int freq = pitchTable[pitch];
   if (freq>700)
   {
     return 700;
@@ -199,10 +199,10 @@ void processReceivedMidiPacket(uint8_t *data, uint8_t size)
 
 void uartmidi_receive_message_callback(uint8_t uartmidi_port, uint8_t midi_status, uint8_t *remaining_message, size_t len, size_t continued_sysex_pos)
 {
-  printf("Received data : ");
-    for(uint8_t i=0; i<len+1; i++)
-        printf("%x ", remaining_message[i]);
-  printf("-");
+  // printf("Received data : ");
+  //   for(uint8_t i=0; i<len+1; i++)
+  //       printf("%x ", remaining_message[i]);
+  // printf("-");
   // enable to print out debug messages
   // ESP_LOGI(TAG, "receive_message CALLBACK uartmidi_port=%d, midi_status=0x%02x, len=%d, continued_sysex_pos=%d, remaining_message:", uartmidi_port, midi_status, len, continued_sysex_pos);
   // esp_log_buffer_hex(TAG, remaining_message, len);
@@ -371,6 +371,7 @@ static void task_mainOS(void *pvParameters)
     bool button_flag = false;
     int encoderLastValue = encoder->get_counter_value(encoder);
     for (;;) {
+        vTaskDelay(20 / portTICK_RATE_MS);
         if(xQueueReceive(gpio_button_evt_queue, &gpio_button_flag, 0)) {
             xQueueReset(gpio_button_evt_queue);
             button_flag = true;
@@ -393,13 +394,13 @@ static void task_mainOS(void *pvParameters)
             break;
         case 1:
             // Menu
-            if (encoder->get_counter_value(encoder) > encoderLastValue) {
+            if (encoder->get_counter_value(encoder) > encoderLastValue + 1) {
                 ssd1306_menuUp( &menu );
                 if (ssd1306_menuSelection(&menu) == 0){
                     ssd1306_menuUp( &menu );
                 }
                 encoderLastValue = encoder->get_counter_value(encoder);
-            } else if (encoder->get_counter_value(encoder) < encoderLastValue) {
+            } else if (encoder->get_counter_value(encoder) < encoderLastValue - 1) {
                 if (ssd1306_menuSelection(&menu) == 3){
                     ssd1306_menuDown( &menu );
                 }
@@ -411,32 +412,32 @@ static void task_mainOS(void *pvParameters)
               OS_State = ssd1306_menuSelection(&menu) + 1;
               button_flag = false;
               ssd1306_clearScreen();
+              ssd1306_setCursor(0, 0);
+              ssd1306_print("MIDI Mode");
+              ssd1306_setCursor(0, 8);
+              ssd1306_print("SOC: ");
+              ssd1306_drawRect(0, 16, 128 - 4, 64 - 4); 
             }
             break;
         case 2:
             // MIDI
             if (encoder->get_counter_value(encoder) > encoderLastValue) {
-              masterDuty += -1*((encoder->get_counter_value(encoder) - encoderLastValue))/2;
+              masterDuty += -1*((encoder->get_counter_value(encoder) - encoderLastValue));
               if (masterDuty<0){
                 masterDuty = 0;
               }
               encoderLastValue = encoder->get_counter_value(encoder);
             } else if (encoder->get_counter_value(encoder) < encoderLastValue) {
-              masterDuty += -1*((encoder->get_counter_value(encoder) - encoderLastValue))/2;
+              masterDuty += -1*((encoder->get_counter_value(encoder) - encoderLastValue));
               if (masterDuty>10){
                 masterDuty = 10;
               }
               encoderLastValue = encoder->get_counter_value(encoder);
             }
-            ssd1306_setCursor(0, 0);
-            ssd1306_print("MIDI Mode");
-            ssd1306_setCursor(0, 8);
-            ssd1306_print("SOC: ");
-            ssd1306_drawRect(0, 16, 128 - 4, 64 - 4); 
             ssd1306_setCursor(24, 24);
             ssd1306_print("Note1: ");
             if (note1On){
-              sprintf(displayBuffer, "%f", note1Freq);
+              sprintf(displayBuffer, "%d", note1Freq);
             }
             else{
               sprintf(displayBuffer, "%d", 0);
@@ -448,7 +449,7 @@ static void task_mainOS(void *pvParameters)
             ssd1306_setCursor(24, 32);
             ssd1306_print("Note2: ");
             if (note2On){
-              sprintf(displayBuffer, "%f", note2Freq);
+              sprintf(displayBuffer, "%d", note2Freq);
             }
             else{
               sprintf(displayBuffer, "%d", 0);
@@ -494,7 +495,7 @@ static void task_mainOS(void *pvParameters)
             ssd1306_drawRect(0, 16, 128 - 4, 64 - 4); 
             ssd1306_setCursor(24, 24);
             ssd1306_print("Freq: ");
-            sprintf(displayBuffer, "%f", note1Freq);
+            sprintf(displayBuffer, "%d", note1Freq);
             ssd1306_print(displayBuffer);
             ssd1306_print("  ");
             ssd1306_setCursor(80, 24);
@@ -525,11 +526,8 @@ static void task_mainOS(void *pvParameters)
         default:
             break;
         }
-        vTaskDelay(10 / portTICK_RATE_MS);
     }
 }
-
-
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -540,8 +538,8 @@ void app_main()
     setupSSD1306();
     setupEncoder();
     setupTimer();
-    xTaskCreate(task_midi, "task_midi"  , 4096, NULL, 4, NULL);
-    xTaskCreate(task_bms, "task_bms"  , 4096, NULL, 3, NULL);
-    xTaskCreate(task_mainOS, "task_mainOS", 4096, NULL, 8, NULL);
+    xTaskCreate(task_midi, "task_midi"  , 4096, NULL, 0, NULL);
+    xTaskCreate(task_bms, "task_bms"  , 4096, NULL, 0, NULL);
+    xTaskCreate(task_mainOS, "task_mainOS", 4096, NULL, 0, NULL);
     esp_log_level_set(TAG, ESP_LOG_WARN);
 }
