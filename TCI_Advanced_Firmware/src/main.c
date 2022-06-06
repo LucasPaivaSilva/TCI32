@@ -17,6 +17,8 @@
 #include "rotary_encoder.h"
 
 #define TAG "TCI32"
+#define TAG_MIDI "MIDI"
+#define TAG_SYS "SYS"
 
 rotary_encoder_t *encoder = NULL;
 
@@ -57,9 +59,10 @@ volatile unsigned char note2Duty = 0;
 volatile unsigned char note2DutyMaster = 0;
 bool note2On = false;
 
-// Essa func é chamada a cada 10us
+volatile int LastButtonPress = 0;
 
 void IRAM_ATTR timer_group0_isr(void *para){// timer group 0, ISR
+  // This function is called every 10us
   int timer_idx = (int) para;
   uint32_t intr_status = TIMERG0.int_st_timers.val;
   if((intr_status & BIT(timer_idx)) && timer_idx == TIMER_0) {
@@ -111,21 +114,16 @@ void IRAM_ATTR timer_group0_isr(void *para){// timer group 0, ISR
 static void IRAM_ATTR gpio_button_isr_handler(void* arg)
 {
     uint32_t gpio_num = (uint32_t) arg;
-    xQueueSendFromISR(gpio_button_evt_queue, &gpio_num, NULL);
+    if (LastButtonPress < millis()-100)
+    {
+      xQueueSendFromISR(gpio_button_evt_queue, &gpio_num, NULL);
+      LastButtonPress = millis();
+    }
 }
 
 int GetOnTime(int freq)
 {
-	int on_time = 1;
-	if (freq < 700)  {on_time = 1;}
-	if (freq < 600)  {on_time = 1;}
-	if (freq < 500)  {on_time = 2;}
-	if (freq < 400)  {on_time = 2;}
-	if (freq < 300)  {on_time = 3;}
-	if (freq < 200)  {on_time = 3;}
-	if (freq < 100)  {on_time = 3;}
-	on_time = on_time * masterDuty;
-	return on_time;
+	return 2 * masterDuty;
 }
 
 int PitchToFreq(uint8_t pitch)
@@ -135,23 +133,27 @@ int PitchToFreq(uint8_t pitch)
   {
     return 700;
   }
-	return freq;
+  else
+  {
+    return freq;
+  }
 }
 
 void processReceivedMidiPacket(uint8_t *data, uint8_t size)
 {
-    printf("Received data : ");
-    for(uint8_t i=0; i<size; i++)
-        printf("%x ", data[i]);
-    printf(" - %d ", data[0]);
-    printf("-");
+    // printf("Received data : ");
+    // for(uint8_t i=0; i<size; i++)
+    //     printf("%x ", data[i]);
+    // printf(" - %d ", data[0]);
+    // printf("-");
+    ESP_LOGI(TAG_MIDI, "Recived Data - Mode: %d \n", data[0]);
     uint8_t *ptr = &data[1];
     uint8_t note = ptr[0];
     uint8_t velocity = ptr[1];
     switch (data[0])
     {
     case 128: ;
-      printf(" - Note Off, note %d, velocity %d\n", note, velocity);
+      // Note Off
       if (note == note1Note){
         note1On = false;
       }
@@ -162,7 +164,7 @@ void processReceivedMidiPacket(uint8_t *data, uint8_t size)
     case 144: ;
       if (velocity != 0)
       {
-        printf(" - Note On, note %d, velocity %d\n", note, velocity);
+        // Note On
         if (note1On == false)
         {
           note1On = true;
@@ -180,7 +182,7 @@ void processReceivedMidiPacket(uint8_t *data, uint8_t size)
       }
       else
       {
-        printf(" - Note Off, note %d, velocity %d\n", note, velocity);
+        // Note Off
         if (note == note1Note)
         {
           note1On = false;
@@ -199,32 +201,24 @@ void processReceivedMidiPacket(uint8_t *data, uint8_t size)
 
 void uartmidi_receive_message_callback(uint8_t uartmidi_port, uint8_t midi_status, uint8_t *remaining_message, size_t len, size_t continued_sysex_pos)
 {
-  // printf("Received data : ");
-  //   for(uint8_t i=0; i<len+1; i++)
-  //       printf("%x ", remaining_message[i]);
-  // printf("-");
-  // enable to print out debug messages
-  // ESP_LOGI(TAG, "receive_message CALLBACK uartmidi_port=%d, midi_status=0x%02x, len=%d, continued_sysex_pos=%d, remaining_message:", uartmidi_port, midi_status, len, continued_sysex_pos);
-  // esp_log_buffer_hex(TAG, remaining_message, len);
-  //printf("Status recebido: %d | Len: %d\n", midi_status, len);
+  ESP_LOGI(TAG_MIDI, "receive_message CALLBACK uartmidi_port=%d, midi_status=0x%02x, len=%d, continued_sysex_pos=%d \n", uartmidi_port, midi_status, len, continued_sysex_pos);
   {
-    // TODO: more comfortable packet creation via special APIs
-
-    // Note: by intention we create new packets for each incoming message
-    // this shows that running status is maintained, and that SysEx streams work as well
-
-    if( midi_status == 0xf0 && continued_sysex_pos > 0 ) {
+    if( midi_status == 0xf0 && continued_sysex_pos > 0 ) 
+    {
       processReceivedMidiPacket(remaining_message, len);
-    } else {
+    } 
+    else 
+    {
       size_t loopback_packet_len = 1 + len; // includes MIDI status and remaining bytes
       uint8_t *loopback_packet = (uint8_t *)malloc(loopback_packet_len * sizeof(uint8_t));
-      if( loopback_packet == NULL ) {
+      if( loopback_packet == NULL ) 
+      {
         // no memory...
-      } else {
+      } else 
+      {
         loopback_packet[0] = midi_status;
         memcpy(&loopback_packet[1], remaining_message, len);
         processReceivedMidiPacket(loopback_packet, loopback_packet_len);
-
         free(loopback_packet);
       }
     }
@@ -300,7 +294,7 @@ void setupEncoder(){
     ESP_ERROR_CHECK(rotary_encoder_new_ec11(&config, &encoder));
 
     // Filter out glitch (1us)
-    ESP_ERROR_CHECK(encoder->set_glitch_filter(encoder, 1));
+    ESP_ERROR_CHECK(encoder->set_glitch_filter(encoder, 10));
 
     // Start encoder
     ESP_ERROR_CHECK(encoder->start(encoder));
@@ -541,5 +535,4 @@ void app_main()
     xTaskCreate(task_midi, "task_midi"  , 4096, NULL, 0, NULL);
     xTaskCreate(task_bms, "task_bms"  , 4096, NULL, 0, NULL);
     xTaskCreate(task_mainOS, "task_mainOS", 4096, NULL, 0, NULL);
-    esp_log_level_set(TAG, ESP_LOG_WARN);
 }
