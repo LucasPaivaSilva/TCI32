@@ -1,0 +1,13 @@
+{
+    "files.associations": {
+        "timerandinterrupts.h": "c",
+        "timer.h": "c",
+        "userdefs.h": "c",
+        "stdio.h": "c",
+        "iosetup.h": "c",
+        "gpio.h": "c",
+        "font8x8_basic.h": "c",
+        "sdkconfig.h": "c",
+        "sstream": "c"
+    }
+}
