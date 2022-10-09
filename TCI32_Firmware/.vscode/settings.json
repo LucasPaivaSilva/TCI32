@@ -8,6 +8,7 @@
         "gpio.h": "c",
         "font8x8_basic.h": "c",
         "sdkconfig.h": "c",
-        "sstream": "c"
+        "sstream": "c",
+        "usermidi.h": "c"
     }
 }

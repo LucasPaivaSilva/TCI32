@@ -17,9 +17,12 @@ void setupSSD1306(){
 }
 
 void bootScreen(){
-    ssd1306_print("TCI 32");
+    ssd1306_setFixedFont(ssd1306xled_font8x16);
+    ssd1306_print("TCI 32\n");
+    ssd1306_print("TCI 32\n");
+    ssd1306_print("TCI 32\n");
     vTaskDelay(3000 / portTICK_RATE_MS);
-    ssd1306_clearScreen(); 
+    //ssd1306_clearScreen(); 
 }
 
 void drawMIDIScreen(){
