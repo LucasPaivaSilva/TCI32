@@ -365,7 +365,8 @@ static void task_mainOS(void *pvParameters)
     bool button_flag = false;
     int encoderLastValue = encoder->get_counter_value(encoder);
     for (;;) {
-        vTaskDelay(20 / portTICK_RATE_MS);
+        vTaskDelay(50 / portTICK_RATE_MS);
+        //ESP_LOGI(TAG_MIDI, "Encoder rotated: %d \n", encoder->get_counter_value(encoder));
         if(xQueueReceive(gpio_button_evt_queue, &gpio_button_flag, 0)) {
             xQueueReset(gpio_button_evt_queue);
             button_flag = true;
